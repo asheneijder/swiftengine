@@ -8,7 +8,7 @@ class Mt547Parser implements SwiftMessageParser
 {
     public function parse(string $finContent): array
     {
-        $block2 = SwiftParserUtil::getBlock($finContent, '2';
+        $block2 = SwiftParserUtil::getBlock($finContent, '2');
         $block4 = SwiftParserUtil::getBlock($finContent, '4');
         if (!$block4) return [];
 
