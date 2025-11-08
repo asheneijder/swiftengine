@@ -11,10 +11,13 @@ class Mt940Parser implements SwiftMessageParser
         $block4 = SwiftParserUtil::getBlock($finContent, '4');
         if (!$block4) return [];
 
+        $sender = SwiftParserUtil::getSenderBic($finContent);
+        $receiver = SwiftParserUtil::getReceiverBic($finContent);
+
         $summary = [
             'Message Type' => 'MT940 (Customer Statement)',
-            'Sender' => SwiftParserUtil::getBlock($finContent, '1'), // Simplified
-            'Receiver' => SwiftParserUtil::getBlock($finContent, '2'), // Simplified
+            'Sender' => $sender,
+            'Receiver' => $receiver,
             'Statement Date' => substr(SwiftParserUtil::getTagValue($block4, '20'), -8, 8), // Assuming YYYYMMDD at end
             'Account' => SwiftParserUtil::getTagValue($block4, '25'),
             'Opening Balance' => SwiftParserUtil::getTagValue($block4, '60F'),
@@ -38,7 +41,7 @@ class Mt940Parser implements SwiftMessageParser
                     $tx['Type'] = ($txMatch[3] === 'D' ? 'Debit' : 'Credit');
                     $tx['Amount (MYR)'] = str_replace(',', '', $txMatch[4]);
                     $tx['Reference'] = trim(substr($txMatch[6], 2)); // Get text after //
-                    $tx['Description'] = $tag86;
+                    $tx['Description'] = str_replace(["\r", "\n"], ' ', $tag86); // Clean up newlines in description
                     
                     $transactions[] = $tx;
                 }

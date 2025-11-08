@@ -8,12 +8,11 @@ class Mt210Parser implements SwiftMessageParser
 {
     public function parse(string $finContent): array
     {
-        $block2 = SwiftParserUtil::getBlock($finContent, '2');
         $block4 = SwiftParserUtil::getBlock($finContent, '4');
         if (!$block4) return [];
         
-        $sender = substr($block2, 4, 11);
-        $receiver = substr($block2, 19, 11);
+        $sender = SwiftParserUtil::getSenderBic($finContent);
+        $receiver = SwiftParserUtil::getReceiverBic($finContent);
 
         $currencyAmount = SwiftParserUtil::parseCurrencyAmount(SwiftParserUtil::getTagValue($block4, '32B'));
 
@@ -24,7 +23,7 @@ class Mt210Parser implements SwiftMessageParser
             'Sender\'s Reference' => SwiftParserUtil::getTagValue($block4, '20'),
             'Related Reference' => SwiftParserUtil::getTagValue($block4, '21'),
             'Expected Value Date' => SwiftParserUtil::formatSwiftDate(SwiftParserUtil::getTagValue($block4, '30')),
-            'Expected Amount' => ($currencyAmount['currency'] ?? '') . ' ' . ($currencyAmount['amount'] ?? ''),
+            'Expected Amount' => ($currencyAmount['currency'] ?? '') . ' ' . number_format((float)($currencyAmount['amount'] ?? 0), 2, '.', ','),
             'Receiving Bank' => SwiftParserUtil::getTagValue($block4, '52A'),
             'Sender\'s Correspondent' => SwiftParserUtil::getTagValue($block4, '56A'),
         ];

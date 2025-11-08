@@ -38,6 +38,40 @@ class SwiftParserUtil
     }
 
     /**
+     * Extracts the Sender BIC from Block 1.
+     * e.g., {1:F01PNBMMYKLXXX...} -> PNBMMYKLXXX
+     * @param string $finContent
+     * @return string|null
+     */
+    public static function getSenderBic(string $finContent): ?string
+    {
+        $block1 = self::getBlock($finContent, '1');
+        // {1:F01<BIC_11>...}
+        if ($block1 && preg_match('/^[F0-9]{3}([A-Z0-9]{8,11})/', $block1, $matches)) {
+            return $matches[1];
+        }
+        return null;
+    }
+
+    /**
+     * Extracts the Receiver BIC from Block 2.
+     * e.g., {2:O543...AMTBMYKLXXX...} -> AMTBMYKLXXX
+     * @param string $finContent
+     * @return string|null
+     */
+    public static function getReceiverBic(string $finContent): ?string
+    {
+        $block2 = self::getBlock($finContent, '2');
+        // {2:O<MT><Time><Date><ReceiverBIC>...
+        // {2:O 543 1405 250710 AMTBMYKLXXX ...
+        if ($block2 && preg_match('/^[IO][0-9]{3}[0-9]{10}([A-Z0-9]{8,11})/', $block2, $matches)) {
+            return $matches[1]; // This should get AMTBMYKLXXX
+        }
+        return null;
+    }
+
+
+    /**
      * Gets the value of a specific tag from Block 4.
      * Handles single-line, multi-line, and qualified/unqualified tags.
      *
@@ -191,7 +225,7 @@ class SwiftParserUtil
     }
     
     /**
-     * Builds a CSV string from headers and data.
+     * Builds a CSV string from headers and data in a horizontal format.
      * @param array $data (associative array, e.g., ['Header 1' => 'Value 1', ...])
      * @return string
      */
@@ -200,8 +234,15 @@ class SwiftParserUtil
         $csvData = [];
         // Add Header
         $csvData[] = '"' . implode('","', array_keys($data)) . '"';
+        
         // Add Row
-        $csvData[] = '"' . implode('","', array_values($data)) . '"';
+        $values = [];
+        foreach ($data as $value) {
+            // Escape double quotes within the value
+            $value = str_replace('"', '""', $value ?? '');
+            $values[] = $value;
+        }
+        $csvData[] = '"' . implode('","', $values) . '"';
         
         return implode("\n", $csvData);
     }
