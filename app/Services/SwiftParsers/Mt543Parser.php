@@ -3,6 +3,7 @@
 namespace App\Services\SwiftParsers;
 
 use App\Services\SwiftParserUtil;
+use App\Services\SwiftCodeTranslator;
 
 class Mt543Parser implements SwiftMessageParser
 {
@@ -28,7 +29,10 @@ class Mt543Parser implements SwiftMessageParser
             'Receiver (Copy To)' => $receiver,
             'Original Receiver (Custodian)' => $originalReceiver,
             'Sender\'s Reference' => SwiftParserUtil::getTagValue($block4, '20C', 'SEME'),
-            'Message Function' => $func,
+            'Message Function' => SwiftCodeTranslator::translateFunction($func),
+            'Payment Status' => SwiftCodeTranslator::translatePaymentStatus(SwiftParserUtil::getTagValue($block4, '22F', 'PAYM')),
+            'Settlement Transaction Type' => SwiftCodeTranslator::translateSettlementType(SwiftParserUtil::getTagValue($block4, '22F', 'SETR')),
+            'Place of Trade' => SwiftCodeTranslator::translatePlaceOfTrade(SwiftParserUtil::getTagValue($block4, '94B', 'TRAD')),
             'Trade Date' => SwiftParserUtil::formatSwiftDate(SwiftParserUtil::getTagValue($block4, '98A', 'TRAD')),
             'Settlement Date' => SwiftParserUtil::formatSwiftDate(SwiftParserUtil::getTagValue($block4, '98A', 'SETT')),
             'Security (ISIN)' => ltrim($securityLines[0] ?? '', 'ISIN '),
@@ -38,6 +42,7 @@ class Mt543Parser implements SwiftMessageParser
             'Total Settlement Amount' => ($settlementAmount['currency'] ?? '') . ' ' . number_format((float)($settlementAmount['amount'] ?? 0), 2, '.', ','),
             'Buyer' => SwiftParserUtil::getTagValue($block4, '95P', 'BUYR'),
             'Safekeeping Account' => SwiftParserUtil::getTagValue($block4, '97A', 'SAFE'),
+            'Receiving Agent' => SwiftParserUtil::getTagValue($block4, '95P', 'REAG'),
             'Place of Settlement' => $originalReceiver,
         ];
     }

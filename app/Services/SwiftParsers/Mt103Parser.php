@@ -3,6 +3,7 @@
 namespace App\Services\SwiftParsers;
 
 use App\Services\SwiftParserUtil;
+use App\Services\SwiftCodeTranslator;
 
 class Mt103Parser implements SwiftMessageParser
 {
@@ -31,13 +32,15 @@ class Mt103Parser implements SwiftMessageParser
             'Sender' => $sender,
             'Receiver (Copy To)' => $receiver,
             'Sender\'s Reference' => SwiftParserUtil::getTagValue($block4, '20'),
+            'Bank Operation Code' => SwiftCodeTranslator::translateBankOpCode(SwiftParserUtil::getTagValue($block4, '23B')),
             'Value Date' => $currencyAmount['date'] ?? null,
             'Amount' => ($currencyAmount['currency'] ?? '') . ' ' . number_format((float)($currencyAmount['amount'] ?? 0), 2, '.', ','),
+            'Ordering Institution' => SwiftParserUtil::getTagValue($block4, '52A'),
             'Payer (Ordering Customer)' => $payerDisplay,
             'Intermediary Bank' => SwiftParserUtil::getTagValue($block4, '57A'),
             'Payee (Beneficiary)' => $beneDisplay,
             'Payment Details' => SwiftParserUtil::getTagValue($block4, '70'),
-            'Charge Code' => SwiftParserUtil::getTagValue($block4, '71A'),
+            'Charge Code' => SwiftCodeTranslator::translateCharges(SwiftParserUtil::getTagValue($block4, '71A')),
         ];
     }
 

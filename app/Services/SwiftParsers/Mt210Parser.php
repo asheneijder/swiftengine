@@ -26,6 +26,8 @@ class Mt210Parser implements SwiftMessageParser
             'Expected Amount' => ($currencyAmount['currency'] ?? '') . ' ' . number_format((float)($currencyAmount['amount'] ?? 0), 2, '.', ','),
             'Receiving Bank' => SwiftParserUtil::getTagValue($block4, '52A'),
             'Sender\'s Correspondent' => SwiftParserUtil::getTagValue($block4, '56A'),
+            'Account With Institution' => SwiftParserUtil::getTagValue($block4, '57A'),
+            'Beneficiary Institution' => SwiftParserUtil::getTagValue($block4, '58A'),
         ];
     }
 

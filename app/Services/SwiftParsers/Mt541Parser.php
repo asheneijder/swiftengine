@@ -3,6 +3,7 @@
 namespace App\Services\SwiftParsers;
 
 use App\Services\SwiftParserUtil;
+use App\Services\SwiftCodeTranslator;
 
 class Mt541Parser implements SwiftMessageParser
 {
@@ -23,12 +24,15 @@ class Mt541Parser implements SwiftMessageParser
             'Sender' => $sender,
             'Receiver (Copy To)' => $receiver,
             'Sender\'s Reference' => SwiftParserUtil::getTagValue($block4, '20C', 'SEME'),
-            'Message Function' => $func,
+            'Message Function' => SwiftCodeTranslator::translateFunction($func),
+            'Payment Status' => SwiftCodeTranslator::translatePaymentStatus(SwiftParserUtil::getTagValue($block4, '22F', 'PAYM')),
+            'Settlement Transaction Type' => SwiftCodeTranslator::translateSettlementType(SwiftParserUtil::getTagValue($block4, '22F', 'SETR')),
             'Settlement Date' => SwiftParserUtil::formatSwiftDate(SwiftParserUtil::getTagValue($block4, '98A', 'SETT')),
             'Security (ISIN)' => ltrim($securityLines[0] ?? '', 'ISIN '),
             'Security Name' => $securityLines[1] ?? null,
             'Quantity' => number_format((float)($quantity['quantity'] ?? 0)) . ' ' . ($quantity['type'] ?? ''),
             'Safekeeping Account' => SwiftParserUtil::getTagValue($block4, '97A', 'SAFE'),
+            'Receiving Agent' => SwiftParserUtil::getTagValue($block4, '95P', 'REAG'),
             'Delivering Agent' => SwiftParserUtil::getTagValue($block4, '95P', 'DEAG'),
             'Seller' => SwiftParserUtil::getTagValue($block4, '95P', 'SELL'),
         ];
