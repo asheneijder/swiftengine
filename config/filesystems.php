@@ -41,10 +41,22 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => env('APP_URL').'/storage',
+            'url' => env('APP_URL') . '/storage',
             'visibility' => 'public',
             'throw' => false,
             'report' => false,
+        ],
+
+        'swift_inbound' => [
+            'driver' => 'local',
+            'root' => storage_path('app/swift_inbound'),
+            'throw' => false,
+        ],
+
+        'swift_outbound' => [
+            'driver' => 'local',
+            'root' => storage_path('app/swift_outbound'),
+            'throw' => false,
         ],
 
         's3' => [
