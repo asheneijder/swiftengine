@@ -21,7 +21,7 @@ class ProcessSwiftMessages extends Command
      *
      * @var string
      */
-    protected $description = 'Process inbound SWIFT .fin files and generate one CSV per MT type.';
+    protected $description = 'Process inbound SWIFT .fin files and generate aggregated CSVs per MT type.';
 
     protected $processingService;
 
@@ -38,7 +38,6 @@ class ProcessSwiftMessages extends Command
         $inboundDisk = 'swift_inbound';
         $outboundDisk = 'swift_outbound';
 
-        // Ensure directories exist
         Storage::disk($inboundDisk)->makeDirectory('/');
         Storage::disk($outboundDisk)->makeDirectory('/');
 
@@ -51,8 +50,8 @@ class ProcessSwiftMessages extends Command
 
         $this->info(sprintf('Found %d file(s) to process.', count($files)));
 
-        // Array to hold data grouped by MT type
-        // Structure: ['543' => [row1, row2], '103' => [row1]]
+        // This array will hold all data grouped by MT type
+        // e.g., ['543' => [ [row1], [row2] ], '103' => [ [row1] ] ]
         $groupedData = [];
         
         $processedCount = 0;
@@ -60,8 +59,11 @@ class ProcessSwiftMessages extends Command
 
         foreach ($files as $filePath) {
             $fileName = basename($filePath);
-            // Skip hidden files or non-fin files if necessary
-            if (str_starts_with($fileName, '.')) continue;
+            
+            // Ignore hidden files (like .gitignore)
+            if (str_starts_with($fileName, '.')) {
+                continue;
+            }
 
             $this->line("Parsing file: {$fileName}");
 
@@ -81,9 +83,6 @@ class ProcessSwiftMessages extends Command
                     
                     $groupedData[$mtType][] = $data;
                     $processedCount++;
-                    
-                    // Optionally move/delete processed file
-                    // Storage::disk($inboundDisk)->delete($filePath);
                 } else {
                     $this->warn("Skipped {$fileName}: Unknown or unsupported MT type.");
                     $errorCount++;
@@ -95,17 +94,17 @@ class ProcessSwiftMessages extends Command
             }
         }
 
-        // Generate CSV files for each MT type
+        // Generate one CSV file for each MT type detected
         foreach ($groupedData as $mtType => $rows) {
             $csvContent = $this->processingService->generateCsvContent($rows);
-            $outputFilename = "MT{$mtType}.csv"; // e.g., MT543.csv
+            $outputFilename = "MT{$mtType}.csv";
             
             Storage::disk($outboundDisk)->put($outputFilename, $csvContent);
             $this->info("Generated aggregated CSV: {$outputFilename} with " . count($rows) . " records.");
         }
 
         $this->info('Processing complete.');
-        $this->info("Successfully parsed: {$processedCount} file(s).");
+        $this->info("Successfully processed: {$processedCount} file(s).");
         
         return 0;
     }

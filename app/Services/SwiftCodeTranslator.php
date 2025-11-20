@@ -12,14 +12,13 @@ class SwiftCodeTranslator
      */
     private static function cleanCode(?string $code): ?string
     {
-        if ($code == null) {
+        if ($code === null) {
             return null;
         }
-        // If the code contains a slash, take the part before it.
         if (str_contains($code, '/')) {
             return Str::before($code, '/');
         }
-        return $code;
+        return trim($code);
     }
 
     public static function translateFunction(?string $code): ?string
@@ -33,6 +32,8 @@ class SwiftCodeTranslator
             'REPL' => 'Replacement',
             'DUPL' => 'Duplicate',
             'RECO' => 'Reconciliation Only',
+            'CODU' => 'Copy Duplicate',
+            'COPY' => 'Copy',
             default => $code,
         };
     }
@@ -67,50 +68,33 @@ class SwiftCodeTranslator
         $code = self::cleanCode($code);
 
         return match ($code) {
-            'BSBK' => 'Buy Sell Back',
-            'BYIY' => 'Buy In',
-            'CLAI' => 'Market Claim',
-            'CNCB' => 'Central Bank Collateral Operation',
-            'COLI' => 'Collateral In',
-            'COLO' => 'Collateral Out',
-            'CONV' => 'DR Conversion',
-            'ETFT' => 'Exchange Traded Funds',
-            'FCTA' => 'Factor Update',
-            'INSP' => 'Move of Stock',
-            'INTT' => 'Traded Interest Changed',
-            'ISSU' => 'Issuance',
-            'MKDW' => 'Mark-Down',
-            'MKUP' => 'Mark-Up',
-            'NETT' => 'Netting',
-            'NSYN' => 'Non Syndicated',
-            'OWNE' => 'External Account Transfer',
-            'OWNI' => 'Internal Account Transfer',
-            'PAIR' => 'Pair-Off',
-            'PLAC' => 'Placement',
-            'PORT' => 'Portfolio Move',
-            'REAL' => 'Realignment',
-            'REDI' => 'Withdrawal',
-            'REDM' => 'Redemption (Funds)',
-            'RELE' => 'DR Release/Cancellation',
-            'REPU' => 'Repo',
-            'RODE' => 'Return of Delivery Without Matching',
-            'RVPO' => 'Reverse Repo',
-            'SBBK' => 'Sell Buy Back',
-            'SBRE' => 'Borrowing Reallocation',
-            'SECB' => 'Securities Borrowing',
-            'SECL' => 'Securities Lending',
-            'SLRE' => 'Lending Reallocation',
-            'SUBS' => 'Subscription (Funds)',
-            'SWIF' => 'Switch From',
-            'SWIT' => 'Switch To',
-            'SYND' => 'Syndicate of Underwriters',
-            'TBAC' => 'TBA Closing',
             'TRAD' => 'Trade',
+            'TRAN' => 'Transfer',
+            'REDE' => 'Redemption',
+            'SUBS' => 'Subscription',
+            'SECL' => 'Securities Lending',
+            'SECB' => 'Securities Borrowing',
+            'REPU' => 'Repo',
+            'RVPO' => 'Reverse Repo',
             'TRPO' => 'Triparty Repo',
             'TRVO' => 'Triparty Reverse Repo',
+            'SBBK' => 'Sell Buy Back',
+            'BSBK' => 'Buy Sell Back',
+            'COLL' => 'Collateral',
+            'CORP' => 'Corporate Action',
+            'CLAI' => 'Market Claim',
+            'CNCB' => 'Central Bank Collateral Operation',
+            'ISSU' => 'Issuance',
+            'REAL' => 'Realignment',
+            'NETT' => 'Netting',
+            'PORT' => 'Portfolio Move',
+            'OWNI' => 'Internal Account Transfer',
+            'OWNE' => 'External Account Transfer',
+            'PAIR' => 'Pair-Off',
             'TURN' => 'Turnaround',
-            'REDE' => 'Redemption', // General Fallback
-            'SUBC' => 'Subscription', // General Fallback
+            'INSP' => 'Move of Stock',
+            'CONV' => 'DR Conversion',
+            'RELE' => 'DR Release/Cancellation',
             default => $code,
         };
     }

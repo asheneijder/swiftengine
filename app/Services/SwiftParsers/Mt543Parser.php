@@ -14,8 +14,8 @@ class Mt543Parser implements SwiftMessageParser
 
         $sender = SwiftParserUtil::getSenderBic($finContent);
         $receiver = SwiftParserUtil::getReceiverBic($finContent);
-        // PSET is often found in sequence E1, but logic depends on your SwiftParserUtil::getTagValue specific implementation for finding tags in blocks.
-        // Assuming getTagValue searches the block string.
+        
+        // Looking for PSET (Place of Settlement)
         $originalReceiver = SwiftParserUtil::getTagValue($block4, '95P', 'PSET'); 
 
         $securityLines = SwiftParserUtil::getMultiLineTagValue($block4, '35B');
@@ -26,13 +26,12 @@ class Mt543Parser implements SwiftMessageParser
         $func = SwiftParserUtil::getTagValue($block4, '23G');
 
         return [
-            'Message Type' => 'MT543 (Receive Against Payment)',
+            'Message Type' => 'MT543 (Deliver Against Payment)',
             'Sender (From)' => $sender,
             'Receiver (Copy To)' => $receiver,
             'Original Receiver (Custodian)' => $originalReceiver,
             'Sender Reference' => SwiftParserUtil::getTagValue($block4, '20C', 'SEME'),
             'Message Function' => SwiftCodeTranslator::translateFunction($func),
-            // 22F qualifiers depend on the message sequence, searching globally in block 4 might pick the first one found.
             'Payment Status' => SwiftCodeTranslator::translatePaymentStatus(SwiftParserUtil::getTagValue($block4, '22F', 'PAYM')),
             'Settlement Transaction Type' => SwiftCodeTranslator::translateSettlementType(SwiftParserUtil::getTagValue($block4, '22F', 'SETR')),
             'Place of Trade' => SwiftCodeTranslator::translatePlaceOfTrade(SwiftParserUtil::getTagValue($block4, '94B', 'TRAD')),
@@ -40,9 +39,9 @@ class Mt543Parser implements SwiftMessageParser
             'Settlement Date' => SwiftParserUtil::formatSwiftDate(SwiftParserUtil::getTagValue($block4, '98A', 'SETT')),
             'Security (ISIN)' => ltrim($securityLines[0] ?? '', 'ISIN '),
             'Security Name' => $securityLines[1] ?? null,
-            'Quantity' => $quantity['quantity'] ?? 0, // Keep raw number for CSV, formatting can happen in UI or export
-            'Dealing Price' => ($price['currency'] ?? '') . ' ' . ($price['price'] ?? ''),
-            'Total Settlement Amount' => ($settlementAmount['currency'] ?? '') . ' ' . ($settlementAmount['amount'] ?? ''),
+            'Quantity' => isset($quantity['quantity']) ? number_format((float)$quantity['quantity']) . ' Units' : null,
+            'Dealing Price' => trim(($price['currency'] ?? '') . ' ' . ($price['price'] ?? '')),
+            'Total Settlement Amount' => trim(($settlementAmount['currency'] ?? '') . ' ' . ($settlementAmount['amount'] ?? '')),
             'Buyer' => SwiftParserUtil::getTagValue($block4, '95P', 'BUYR'),
             'Safekeeping Account' => SwiftParserUtil::getTagValue($block4, '97A', 'SAFE'),
             'Receiving Agent' => SwiftParserUtil::getTagValue($block4, '95P', 'REAG'),
@@ -52,8 +51,6 @@ class Mt543Parser implements SwiftMessageParser
 
     public function toCsv(array $data): string
     {
-        // This method is less used now as we aggregate in the Service/Command, 
-        // but kept for interface compatibility.
         return SwiftParserUtil::buildCsv($data);
     }
 }

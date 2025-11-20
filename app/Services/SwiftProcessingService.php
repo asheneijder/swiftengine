@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Services\SwiftParsers\SwiftMessageParser;
 use App\Services\SwiftParsers\Mt103Parser;
 use App\Services\SwiftParsers\Mt210Parser;
 use App\Services\SwiftParsers\Mt541Parser;
@@ -11,6 +10,7 @@ use App\Services\SwiftParsers\Mt545Parser;
 use App\Services\SwiftParsers\Mt547Parser;
 use App\Services\SwiftParsers\Mt940Parser;
 use App\Services\SwiftParserUtil;
+use Illuminate\Support\Facades\Storage;
 
 class SwiftProcessingService
 {
@@ -29,25 +29,24 @@ class SwiftProcessingService
 
     /**
      * Parse a single .fin file content and return structured data.
+     * This separates parsing from file writing.
      *
      * @param string $fileContent
      * @param string $fileName
-     * @return array|null Returns ['type' => '543', 'data' => [...]] or null on failure.
+     * @return array|null Returns ['type' => '543', 'data' => [...]] or null.
      */
     public function parseFile(string $fileContent, string $fileName): ?array
     {
         $mtType = SwiftParserUtil::getMessageType($fileContent);
 
         if (!$mtType || !isset($this->parsers[$mtType])) {
-            return null; // Unknown or unsupported MT type
+            return null; 
         }
 
-        /** @var SwiftMessageParser $parser */
         $parser = new $this->parsers[$mtType]();
-
         $parsedData = $parser->parse($fileContent);
 
-        // Include filename in data for reference
+        // Add source filename for tracking
         $parsedData['_source_file'] = $fileName;
 
         return [
@@ -57,7 +56,11 @@ class SwiftProcessingService
     }
     
     /**
-     * Helper to convert array of rows to CSV string
+     * Generates CSV string content from an array of rows.
+     * Includes sanitization to prevent "Array to string conversion" errors.
+     *
+     * @param array $rows
+     * @return string
      */
     public function generateCsvContent(array $rows): string
     {
@@ -65,7 +68,7 @@ class SwiftProcessingService
             return '';
         }
 
-        // Get headers from the first row
+        // Extract headers from the keys of the first row
         $headers = array_keys(reset($rows));
         
         $output = fopen('php://temp', 'r+');
@@ -75,7 +78,17 @@ class SwiftProcessingService
         
         // Write rows
         foreach ($rows as $row) {
-            fputcsv($output, $row);
+            // SANITIZATION STEP:
+            // Check every item in the row. If it is an array or object, 
+            // convert it to a JSON string. Otherwise keep it as is.
+            $sanitizedRow = array_map(function($item) {
+                if (is_array($item) || is_object($item)) {
+                    return json_encode($item);
+                }
+                return $item;
+            }, $row);
+
+            fputcsv($output, $sanitizedRow);
         }
         
         rewind($output);
