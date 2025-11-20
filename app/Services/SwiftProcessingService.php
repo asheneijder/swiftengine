@@ -11,8 +11,6 @@ use App\Services\SwiftParsers\Mt545Parser;
 use App\Services\SwiftParsers\Mt547Parser;
 use App\Services\SwiftParsers\Mt940Parser;
 use App\Services\SwiftParserUtil;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 class SwiftProcessingService
 {
@@ -30,13 +28,13 @@ class SwiftProcessingService
     ];
 
     /**
-     * Process a single .fin file content.
+     * Parse a single .fin file content and return structured data.
      *
      * @param string $fileContent
-     * @param string $fileName The original filename (e.g., "msg1.fin")
-     * @return string|null The path to the saved CSV file, or null on failure.
+     * @param string $fileName
+     * @return array|null Returns ['type' => '543', 'data' => [...]] or null on failure.
      */
-    public function processFile(string $fileContent, string $fileName): ?string
+    public function parseFile(string $fileContent, string $fileName): ?array
     {
         $mtType = SwiftParserUtil::getMessageType($fileContent);
 
@@ -48,23 +46,42 @@ class SwiftProcessingService
         $parser = new $this->parsers[$mtType]();
 
         $parsedData = $parser->parse($fileContent);
-        $csvContent = $parser->toCsv($parsedData);
 
-        // --- FILENAME LOGIC ADJUSTED AS REQUESTED ---
-        // Create a .csv extension from the original file name.
-        // e.g., "msg1.fin" becomes "msg1.csv"
-        if (Str::endsWith(strtolower($fileName), '.fin')) {
-            $csvFileName = Str::beforeLast($fileName, '.fin') . '.csv';
-        } else {
-            // Fallback in case the file has a different or no extension
-            $csvFileName = $fileName . '.csv';
+        // Include filename in data for reference
+        $parsedData['_source_file'] = $fileName;
+
+        return [
+            'type' => $mtType,
+            'data' => $parsedData,
+        ];
+    }
+    
+    /**
+     * Helper to convert array of rows to CSV string
+     */
+    public function generateCsvContent(array $rows): string
+    {
+        if (empty($rows)) {
+            return '';
         }
-        // --- END OF ADJUSTMENT ---
-       
-        $outputPath = "mt{$mtType}/{$csvFileName}";
 
-        Storage::disk('swift_outbound')->put($outputPath, $csvContent);
-
-        return $outputPath;
+        // Get headers from the first row
+        $headers = array_keys(reset($rows));
+        
+        $output = fopen('php://temp', 'r+');
+        
+        // Write headers
+        fputcsv($output, $headers);
+        
+        // Write rows
+        foreach ($rows as $row) {
+            fputcsv($output, $row);
+        }
+        
+        rewind($output);
+        $csvContent = stream_get_contents($output);
+        fclose($output);
+        
+        return $csvContent;
     }
 }

@@ -21,24 +21,16 @@ class ProcessSwiftMessages extends Command
      *
      * @var string
      */
-    protected $description = 'Process inbound SWIFT .fin files from the swift_inbound directory and generate CSV output.';
+    protected $description = 'Process inbound SWIFT .fin files and generate one CSV per MT type.';
 
     protected $processingService;
 
-    /**
-     * Create a new command instance.
-     *
-     * @param SwiftProcessingService $processingService
-     */
     public function __construct(SwiftProcessingService $processingService)
     {
         parent::__construct();
         $this->processingService = $processingService;
     }
 
-    /**
-     * Execute the console command.
-     */
     public function handle()
     {
         $this->info('Starting SWIFT inbound file processing...');
@@ -53,45 +45,68 @@ class ProcessSwiftMessages extends Command
         $files = Storage::disk($inboundDisk)->files();
 
         if (empty($files)) {
-            $this->warn('No files found in storage/app/swift_inbound to process.');
+            $this->warn('No files found to process.');
             return 0;
         }
 
         $this->info(sprintf('Found %d file(s) to process.', count($files)));
 
+        // Array to hold data grouped by MT type
+        // Structure: ['543' => [row1, row2], '103' => [row1]]
+        $groupedData = [];
+        
         $processedCount = 0;
         $errorCount = 0;
 
         foreach ($files as $filePath) {
             $fileName = basename($filePath);
-            $this->line("Processing file: {$fileName}");
+            // Skip hidden files or non-fin files if necessary
+            if (str_starts_with($fileName, '.')) continue;
+
+            $this->line("Parsing file: {$fileName}");
 
             try {
                 $fileContent = Storage::disk($inboundDisk)->get($filePath);
                 
-                // Process and save the file
-                $outputPath = $this->processingService->processFile($fileContent, $fileName);
+                // Parse the file content
+                $result = $this->processingService->parseFile($fileContent, $fileName);
 
-                if ($outputPath) {
-                    $this->info("Successfully processed and saved to: {$outputPath}");
-                    // Optionally, delete the original file after successful processing
-                    // Storage::disk($inboundDisk)->delete($filePath);
+                if ($result) {
+                    $mtType = $result['type'];
+                    $data = $result['data'];
+                    
+                    if (!isset($groupedData[$mtType])) {
+                        $groupedData[$mtType] = [];
+                    }
+                    
+                    $groupedData[$mtType][] = $data;
                     $processedCount++;
+                    
+                    // Optionally move/delete processed file
+                    // Storage::disk($inboundDisk)->delete($filePath);
                 } else {
-                    $this->error("Failed to identify MT type for file: {$fileName}");
+                    $this->warn("Skipped {$fileName}: Unknown or unsupported MT type.");
                     $errorCount++;
                 }
             } catch (\Exception $e) {
-                $this->error("Error processing file {$fileName}: " . $e->getMessage());
+                $this->error("Error processing {$fileName}: " . $e->getMessage());
                 Log::error("SWIFT Processing Error for {$fileName}:", ['exception' => $e]);
                 $errorCount++;
             }
         }
 
-        $this->info('Processing complete.');
-        $this->info("Successfully processed: {$processedCount} file(s).");
-        $this->warn("Failed to process: {$errorCount} file(s).");
+        // Generate CSV files for each MT type
+        foreach ($groupedData as $mtType => $rows) {
+            $csvContent = $this->processingService->generateCsvContent($rows);
+            $outputFilename = "MT{$mtType}.csv"; // e.g., MT543.csv
+            
+            Storage::disk($outboundDisk)->put($outputFilename, $csvContent);
+            $this->info("Generated aggregated CSV: {$outputFilename} with " . count($rows) . " records.");
+        }
 
+        $this->info('Processing complete.');
+        $this->info("Successfully parsed: {$processedCount} file(s).");
+        
         return 0;
     }
 }
