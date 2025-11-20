@@ -3,26 +3,15 @@
 namespace App\Console\Commands;
 
 use App\Services\SwiftProcessingService;
+use App\Services\SwiftCodeTranslator;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 
 class ProcessSwiftMessages extends Command
 {
-    /**
-     * The name and signature of the console command.
-     *
-     * @var string
-     */
     protected $signature = 'swift:process-inbound';
-
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
-    protected $description = 'Process inbound SWIFT .fin files and generate aggregated CSVs per MT type.';
-
+    protected $description = 'Process inbound SWIFT .fin files, grouping them by Type/Sender/Receiver/Date into single CSVs.';
     protected $processingService;
 
     public function __construct(SwiftProcessingService $processingService)
@@ -48,64 +37,106 @@ class ProcessSwiftMessages extends Command
             return 0;
         }
 
-        $this->info(sprintf('Found %d file(s) to process.', count($files)));
-
-        // This array will hold all data grouped by MT type
-        // e.g., ['543' => [ [row1], [row2] ], '103' => [ [row1] ] ]
-        $groupedData = [];
-        
-        $processedCount = 0;
-        $errorCount = 0;
+        // Array to hold grouped data
+        // Key will be a composite of Type|Sender|Receiver|Date
+        $groupedMessages = [];
 
         foreach ($files as $filePath) {
             $fileName = basename($filePath);
-            
-            // Ignore hidden files (like .gitignore)
-            if (str_starts_with($fileName, '.')) {
-                continue;
-            }
+            if (str_starts_with($fileName, '.')) continue;
 
-            $this->line("Parsing file: {$fileName}");
+            $this->line("Parsing: {$fileName}");
 
             try {
                 $fileContent = Storage::disk($inboundDisk)->get($filePath);
-                
-                // Parse the file content
                 $result = $this->processingService->parseFile($fileContent, $fileName);
 
                 if ($result) {
-                    $mtType = $result['type'];
                     $data = $result['data'];
-                    
-                    if (!isset($groupedData[$mtType])) {
-                        $groupedData[$mtType] = [];
+                    $meta = $result['meta'];
+
+                    // Create a unique key for grouping
+                    // Only messages with EXACTLY the same Type, Sender, Receiver, and Date will be merged.
+                    $groupKey = sprintf(
+                        '%s|%s|%s|%s',
+                        $meta['mt_type'],
+                        $meta['sender'],
+                        $meta['receiver'],
+                        $meta['date_yymmdd']
+                    );
+
+                    if (!isset($groupedMessages[$groupKey])) {
+                        $groupedMessages[$groupKey] = [
+                            'meta' => $meta,
+                            'rows' => []
+                        ];
                     }
-                    
-                    $groupedData[$mtType][] = $data;
-                    $processedCount++;
+
+                    // Add this message's data as a new row in the group
+                    $groupedMessages[$groupKey]['rows'][] = $data;
+
                 } else {
-                    $this->warn("Skipped {$fileName}: Unknown or unsupported MT type.");
-                    $errorCount++;
+                    $this->warn("Skipped {$fileName}: Unable to determine MT type.");
                 }
             } catch (\Exception $e) {
                 $this->error("Error processing {$fileName}: " . $e->getMessage());
-                Log::error("SWIFT Processing Error for {$fileName}:", ['exception' => $e]);
-                $errorCount++;
+                Log::error("SWIFT Processing Error for {$fileName}", ['exception' => $e]);
             }
         }
 
-        // Generate one CSV file for each MT type detected
-        foreach ($groupedData as $mtType => $rows) {
+        $this->info("Grouping complete. Generating CSV files...");
+
+        // Generate CSVs from groups
+        foreach ($groupedMessages as $key => $group) {
+            $meta = $group['meta'];
+            $rows = $group['rows'];
+
+            // 1. Prepare Filename Variables
+            $mtType = $meta['mt_type'];
+            $sender = $meta['sender'];
+            $receiver = $meta['receiver'];
+            $rawDate = $meta['date_yymmdd']; // YYMMDD
+
+            // Convert YYMMDD to DDMMYY
+            $dateDdmmyy = $rawDate; 
+            if (strlen($rawDate) == 6) {
+                $year = substr($rawDate, 0, 2);
+                $month = substr($rawDate, 2, 2);
+                $day = substr($rawDate, 4, 2);
+                $dateDdmmyy = $day . $month . $year;
+            }
+
+            $meaning = strtolower(SwiftCodeTranslator::translateMessageType($mtType));
+            // Replace spaces with underscores for safer filenames if preferred, or keep spaces as requested
+            // $meaning = str_replace(' ', '_', $meaning); 
+
+            // 2. Construct Filename
+            // Format: messagetype_meaning_from:bic-to:bic_date(ddmmyy).csv
+            // Example: 541_receive against payment_ARTBMYKLXXX-PMBKLCSUXXX_201125.csv
+            $filename = sprintf(
+                "%s_%s_%s-%s_%s.csv",
+                $mtType,
+                $meaning,
+                $sender,
+                $receiver,
+                $dateDdmmyy
+            );
+
+            // 3. Create Directory (Group by Message Type)
+            $directory = $mtType;
+            Storage::disk($outboundDisk)->makeDirectory($directory);
+
+            // 4. Generate Content
             $csvContent = $this->processingService->generateCsvContent($rows);
-            $outputFilename = "MT{$mtType}.csv";
-            
-            Storage::disk($outboundDisk)->put($outputFilename, $csvContent);
-            $this->info("Generated aggregated CSV: {$outputFilename} with " . count($rows) . " records.");
+
+            // 5. Save
+            $fullPath = $directory . '/' . $filename;
+            Storage::disk($outboundDisk)->put($fullPath, $csvContent);
+
+            $this->info("Created: {$fullPath} (" . count($rows) . " messages combined)");
         }
 
-        $this->info('Processing complete.');
-        $this->info("Successfully processed: {$processedCount} file(s).");
-        
+        $this->info("All processing complete.");
         return 0;
     }
 }

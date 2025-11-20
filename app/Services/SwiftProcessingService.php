@@ -10,13 +10,9 @@ use App\Services\SwiftParsers\Mt545Parser;
 use App\Services\SwiftParsers\Mt547Parser;
 use App\Services\SwiftParsers\Mt940Parser;
 use App\Services\SwiftParserUtil;
-use Illuminate\Support\Facades\Storage;
 
 class SwiftProcessingService
 {
-    /**
-     * @var array
-     */
     protected $parsers = [
         '103' => Mt103Parser::class,
         '210' => Mt210Parser::class,
@@ -27,60 +23,49 @@ class SwiftProcessingService
         '940' => Mt940Parser::class,
     ];
 
-    /**
-     * Parse a single .fin file content and return structured data.
-     * This separates parsing from file writing.
-     *
-     * @param string $fileContent
-     * @param string $fileName
-     * @return array|null Returns ['type' => '543', 'data' => [...]] or null.
-     */
     public function parseFile(string $fileContent, string $fileName): ?array
     {
         $mtType = SwiftParserUtil::getMessageType($fileContent);
 
         if (!$mtType || !isset($this->parsers[$mtType])) {
-            return null; 
+            return null;
         }
 
         $parser = new $this->parsers[$mtType]();
         $parsedData = $parser->parse($fileContent);
 
-        // Add source filename for tracking
-        $parsedData['_source_file'] = $fileName;
+        // Extract Metadata for filename generation and grouping
+        $sender = SwiftParserUtil::getSenderBic($fileContent) ?? 'UNKNOWN';
+        $receiver = SwiftParserUtil::getReceiverBic($fileContent) ?? 'UNKNOWN';
+        $messageDate = SwiftParserUtil::getMessageDate($fileContent) ?? '000000'; // YYMMDD
 
+        // Return standard structure with separated metadata
         return [
             'type' => $mtType,
             'data' => $parsedData,
+            'meta' => [
+                'mt_type' => $mtType,
+                'sender' => $sender,
+                'receiver' => $receiver,
+                'date_yymmdd' => $messageDate,
+                'source_file' => $fileName
+            ]
         ];
     }
     
-    /**
-     * Generates CSV string content from an array of rows.
-     * Includes sanitization to prevent "Array to string conversion" errors.
-     *
-     * @param array $rows
-     * @return string
-     */
     public function generateCsvContent(array $rows): string
     {
         if (empty($rows)) {
             return '';
         }
 
-        // Extract headers from the keys of the first row
         $headers = array_keys(reset($rows));
         
         $output = fopen('php://temp', 'r+');
-        
-        // Write headers
         fputcsv($output, $headers);
         
-        // Write rows
         foreach ($rows as $row) {
-            // SANITIZATION STEP:
-            // Check every item in the row. If it is an array or object, 
-            // convert it to a JSON string. Otherwise keep it as is.
+            // Sanitize row values to avoid Array to String conversion errors
             $sanitizedRow = array_map(function($item) {
                 if (is_array($item) || is_object($item)) {
                     return json_encode($item);
