@@ -2,12 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Models\SwiftMessage; // Import the Model
 use App\Services\SwiftProcessingService;
-use App\Services\SwiftCodeTranslator;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Log;
 
 class ProcessSwiftMessages extends Command
 {
@@ -24,125 +20,23 @@ class ProcessSwiftMessages extends Command
     public function handle()
     {
         $this->info('Starting SWIFT inbound file processing...');
-        
-        $inboundDisk = 'swift_inbound';
-        $outboundDisk = 'swift_outbound';
 
-        // Ensure directories exist
-        Storage::disk($inboundDisk)->makeDirectory('/');
-        Storage::disk($outboundDisk)->makeDirectory('/');
-
-        $files = Storage::disk($inboundDisk)->files();
-
-        if (empty($files)) {
-            $this->warn('No files found to process.');
-            return 0;
-        }
-
-        $groupedMessages = [];
-
-        foreach ($files as $filePath) {
-            $fileName = basename($filePath);
-            if (str_starts_with($fileName, '.')) continue;
-
-            $this->line("Parsing: {$fileName}");
-
-            try {
-                $fileContent = Storage::disk($inboundDisk)->get($filePath);
-                $result = $this->processingService->parseFile($fileContent, $fileName);
-
-                if ($result) {
-                    $data = $result['data'];
-                    $meta = $result['meta'];
-
-                    // --- DUPLICATE CHECK START ---
-                    // Check if exact data already exists in MongoDB
-                    $exists = SwiftMessage::where(function ($query) use ($data) {
-                        foreach ($data as $key => $value) {
-                            // We check for exact match on all parsed business data keys
-                            $query->where($key, $value);
-                        }
-                    })->exists();
-
-                    if ($exists) {
-                        $this->warn("  [REJECTED] Duplicate data found for {$fileName}. Skipping.");
-                        continue; // Stop processing this file
-                    }
-                    // --- DUPLICATE CHECK END ---
-
-                    // If unique, save to MongoDB
-                    SwiftMessage::create($data);
-                    $this->info("  [ACCEPTED] Saved to database.");
-
-                    // Proceed to Grouping for CSV
-                    $groupKey = sprintf(
-                        '%s|%s|%s|%s',
-                        $meta['mt_type'],
-                        $meta['sender'],
-                        $meta['receiver'],
-                        $meta['date_yymmdd']
-                    );
-
-                    if (!isset($groupedMessages[$groupKey])) {
-                        $groupedMessages[$groupKey] = [
-                            'meta' => $meta,
-                            'rows' => []
-                        ];
-                    }
-
-                    $groupedMessages[$groupKey]['rows'][] = $data;
-
-                } else {
-                    $this->warn("Skipped {$fileName}: Unable to determine MT type.");
-                }
-            } catch (\Exception $e) {
-                $this->error("Error processing {$fileName}: " . $e->getMessage());
-                Log::error("SWIFT Processing Error for {$fileName}", ['exception' => $e]);
+        // Delegate all logic to the service
+        // We pass a closure to handle console output (info, warn, error)
+        $this->processingService->processInboundFiles(
+            'swift_inbound',
+            'swift_outbound',
+            function (string $type, string $message) {
+                match ($type) {
+                    'info' => $this->info($message),
+                    'warn' => $this->warn($message),
+                    'error' => $this->error($message),
+                    'line' => $this->line($message),
+                    default => $this->line($message),
+                };
             }
-        }
+        );
 
-        $this->info("Grouping complete. Generating CSV files...");
-
-        foreach ($groupedMessages as $group) {
-            $meta = $group['meta'];
-            $rows = $group['rows'];
-
-            $mtType = $meta['mt_type'];
-            $sender = $meta['sender'];
-            $receiver = $meta['receiver'];
-            $rawDate = $meta['date_yymmdd'];
-
-            // Convert YYMMDD to DDMMYY for filename
-            $dateDdmmyy = $rawDate; 
-            if (strlen($rawDate) == 6) {
-                $year = substr($rawDate, 0, 2);
-                $month = substr($rawDate, 2, 2);
-                $day = substr($rawDate, 4, 2);
-                $dateDdmmyy = $day . $month . $year;
-            }
-
-            $meaning = strtolower(SwiftCodeTranslator::translateMessageType($mtType));
-            
-            $filename = sprintf(
-                "%s_%s_%s-%s_%s.csv",
-                $mtType,
-                $meaning,
-                $sender,
-                $receiver,
-                $dateDdmmyy
-            );
-
-            $directory = $mtType;
-            Storage::disk($outboundDisk)->makeDirectory($directory);
-
-            $csvContent = $this->processingService->generateCsvContent($rows);
-            $fullPath = $directory . '/' . $filename;
-            Storage::disk($outboundDisk)->put($fullPath, $csvContent);
-
-            $this->info("Created CSV: {$fullPath}");
-        }
-
-        $this->info("All processing complete.");
         return 0;
     }
 }
