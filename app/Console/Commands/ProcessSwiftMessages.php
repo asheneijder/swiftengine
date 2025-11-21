@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use App\Services\SwiftProcessingService;
 use App\Services\SwiftCodeTranslator;
-use App\Models\SwiftMessage; // [NEW] Import the model
+use App\Models\SwiftMessage; // <--- IMPORT THIS MODEL
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
@@ -54,22 +54,25 @@ class ProcessSwiftMessages extends Command
                     $data = $result['data'];
                     $meta = $result['meta'];
 
-                    // [NEW] 1. Add Meta data to the payload for easier querying later
-                    // We merge the CSV columns ($data) with metadata
+                    // ============================================================
+                    // [FIX START] SAVE TO MONGODB
+                    // This is the part your current file is missing!
+                    // ============================================================
                     $mongoDocument = array_merge($data, [
-                        'meta_filename' => $fileName,
-                        'meta_processed_at' => now(),
-                        'meta_sender' => $meta['sender'],
-                        'meta_receiver' => $meta['receiver'],
-                        'meta_type' => $meta['mt_type'],
-                        'meta_date' => $meta['date_yymmdd'],
+                        '_meta_filename' => $fileName,
+                        '_meta_processed_at' => now(),
+                        '_meta_type' => (string)$meta['mt_type'], // Fixes "Unknown Type"
+                        '_meta_sender' => $meta['sender'],
+                        '_meta_receiver' => $meta['receiver'],
+                        '_meta_date' => $meta['date_yymmdd'],
                     ]);
 
-                    // [NEW] 2. Save to MongoDB
                     SwiftMessage::create($mongoDocument);
-                    $this->info("   -> Saved to MongoDB");
+                    // ============================================================
+                    // [FIX END]
+                    // ============================================================
 
-                    // [EXISTING] Grouping logic for CSV generation
+                    // CSV Grouping Logic
                     $groupKey = sprintf(
                         '%s|%s|%s|%s',
                         $meta['mt_type'],
@@ -96,20 +99,17 @@ class ProcessSwiftMessages extends Command
             }
         }
 
-        // ... [Keep existing CSV generation logic below unchanged] ...
-        
-        $this->info("Grouping complete. Generating CSV files...");
+        $this->info("Mongo Import complete. Generating CSV files...");
 
+        // Generate CSVs
         foreach ($groupedMessages as $key => $group) {
-            // ... (Existing CSV logic) ...
             $meta = $group['meta'];
             $rows = $group['rows'];
 
-            // 1. Prepare Filename Variables
             $mtType = $meta['mt_type'];
             $sender = $meta['sender'];
             $receiver = $meta['receiver'];
-            $rawDate = $meta['date_yymmdd']; 
+            $rawDate = $meta['date_yymmdd'];
 
             $dateDdmmyy = $rawDate; 
             if (strlen($rawDate) == 6) {
