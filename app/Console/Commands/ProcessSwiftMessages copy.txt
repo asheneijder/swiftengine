@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use App\Services\SwiftProcessingService;
 use App\Services\SwiftCodeTranslator;
-use App\Models\SwiftMessage; // [NEW] Import the model
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
@@ -12,7 +11,7 @@ use Illuminate\Support\Facades\Log;
 class ProcessSwiftMessages extends Command
 {
     protected $signature = 'swift:process-inbound';
-    protected $description = 'Process inbound SWIFT .fin files, save to MongoDB and group into CSVs.';
+    protected $description = 'Process inbound SWIFT .fin files, grouping them by Type/Sender/Receiver/Date into single CSVs.';
     protected $processingService;
 
     public function __construct(SwiftProcessingService $processingService)
@@ -38,6 +37,8 @@ class ProcessSwiftMessages extends Command
             return 0;
         }
 
+        // Array to hold grouped data
+        // Key will be a composite of Type|Sender|Receiver|Date
         $groupedMessages = [];
 
         foreach ($files as $filePath) {
@@ -54,22 +55,8 @@ class ProcessSwiftMessages extends Command
                     $data = $result['data'];
                     $meta = $result['meta'];
 
-                    // [NEW] 1. Add Meta data to the payload for easier querying later
-                    // We merge the CSV columns ($data) with metadata
-                    $mongoDocument = array_merge($data, [
-                        'meta_filename' => $fileName,
-                        'meta_processed_at' => now(),
-                        'meta_sender' => $meta['sender'],
-                        'meta_receiver' => $meta['receiver'],
-                        'meta_type' => $meta['mt_type'],
-                        'meta_date' => $meta['date_yymmdd'],
-                    ]);
-
-                    // [NEW] 2. Save to MongoDB
-                    SwiftMessage::create($mongoDocument);
-                    $this->info("   -> Saved to MongoDB");
-
-                    // [EXISTING] Grouping logic for CSV generation
+                    // Create a unique key for grouping
+                    // Only messages with EXACTLY the same Type, Sender, Receiver, and Date will be merged.
                     $groupKey = sprintf(
                         '%s|%s|%s|%s',
                         $meta['mt_type'],
@@ -85,6 +72,7 @@ class ProcessSwiftMessages extends Command
                         ];
                     }
 
+                    // Add this message's data as a new row in the group
                     $groupedMessages[$groupKey]['rows'][] = $data;
 
                 } else {
@@ -96,12 +84,10 @@ class ProcessSwiftMessages extends Command
             }
         }
 
-        // ... [Keep existing CSV generation logic below unchanged] ...
-        
         $this->info("Grouping complete. Generating CSV files...");
 
+        // Generate CSVs from groups
         foreach ($groupedMessages as $key => $group) {
-            // ... (Existing CSV logic) ...
             $meta = $group['meta'];
             $rows = $group['rows'];
 
@@ -109,8 +95,9 @@ class ProcessSwiftMessages extends Command
             $mtType = $meta['mt_type'];
             $sender = $meta['sender'];
             $receiver = $meta['receiver'];
-            $rawDate = $meta['date_yymmdd']; 
+            $rawDate = $meta['date_yymmdd']; // YYMMDD
 
+            // Convert YYMMDD to DDMMYY
             $dateDdmmyy = $rawDate; 
             if (strlen($rawDate) == 6) {
                 $year = substr($rawDate, 0, 2);
@@ -120,7 +107,12 @@ class ProcessSwiftMessages extends Command
             }
 
             $meaning = strtolower(SwiftCodeTranslator::translateMessageType($mtType));
+            // Replace spaces with underscores for safer filenames if preferred, or keep spaces as requested
+            // $meaning = str_replace(' ', '_', $meaning); 
 
+            // 2. Construct Filename
+            // Format: messagetype_meaning_from:bic-to:bic_date(ddmmyy).csv
+            // Example: 541_receive against payment_ARTBMYKLXXX-PMBKLCSUXXX_201125.csv
             $filename = sprintf(
                 "%s_%s_%s-%s_%s.csv",
                 $mtType,
@@ -130,9 +122,14 @@ class ProcessSwiftMessages extends Command
                 $dateDdmmyy
             );
 
+            // 3. Create Directory (Group by Message Type)
             $directory = $mtType;
             Storage::disk($outboundDisk)->makeDirectory($directory);
+
+            // 4. Generate Content
             $csvContent = $this->processingService->generateCsvContent($rows);
+
+            // 5. Save
             $fullPath = $directory . '/' . $filename;
             Storage::disk($outboundDisk)->put($fullPath, $csvContent);
 
