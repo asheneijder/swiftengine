@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands;
 
-use App\Models\SwiftMessage; // Import the Model
 use App\Services\SwiftProcessingService;
 use App\Services\SwiftCodeTranslator;
+use App\Models\SwiftMessage; // <--- IMPORT THIS MODEL
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 class ProcessSwiftMessages extends Command
 {
     protected $signature = 'swift:process-inbound';
-    protected $description = 'Process inbound SWIFT .fin files, save to MongoDB, and generate grouped CSVs.';
+    protected $description = 'Process inbound SWIFT .fin files, save to MongoDB and group into CSVs.';
     protected $processingService;
 
     public function __construct(SwiftProcessingService $processingService)
@@ -28,7 +28,6 @@ class ProcessSwiftMessages extends Command
         $inboundDisk = 'swift_inbound';
         $outboundDisk = 'swift_outbound';
 
-        // Ensure directories exist
         Storage::disk($inboundDisk)->makeDirectory('/');
         Storage::disk($outboundDisk)->makeDirectory('/');
 
@@ -55,26 +54,25 @@ class ProcessSwiftMessages extends Command
                     $data = $result['data'];
                     $meta = $result['meta'];
 
-                    // --- DUPLICATE CHECK START ---
-                    // Check if exact data already exists in MongoDB
-                    $exists = SwiftMessage::where(function ($query) use ($data) {
-                        foreach ($data as $key => $value) {
-                            // We check for exact match on all parsed business data keys
-                            $query->where($key, $value);
-                        }
-                    })->exists();
+                    // ============================================================
+                    // [FIX START] SAVE TO MONGODB
+                    // This is the part your current file is missing!
+                    // ============================================================
+                    $mongoDocument = array_merge($data, [
+                        '_meta_filename' => $fileName,
+                        '_meta_processed_at' => now(),
+                        '_meta_type' => (string)$meta['mt_type'], // Fixes "Unknown Type"
+                        '_meta_sender' => $meta['sender'],
+                        '_meta_receiver' => $meta['receiver'],
+                        '_meta_date' => $meta['date_yymmdd'],
+                    ]);
 
-                    if ($exists) {
-                        $this->warn("  [REJECTED] Duplicate data found for {$fileName}. Skipping.");
-                        continue; // Stop processing this file
-                    }
-                    // --- DUPLICATE CHECK END ---
+                    SwiftMessage::create($mongoDocument);
+                    // ============================================================
+                    // [FIX END]
+                    // ============================================================
 
-                    // If unique, save to MongoDB
-                    SwiftMessage::create($data);
-                    $this->info("  [ACCEPTED] Saved to database.");
-
-                    // Proceed to Grouping for CSV
+                    // CSV Grouping Logic
                     $groupKey = sprintf(
                         '%s|%s|%s|%s',
                         $meta['mt_type'],
@@ -101,9 +99,10 @@ class ProcessSwiftMessages extends Command
             }
         }
 
-        $this->info("Grouping complete. Generating CSV files...");
+        $this->info("Mongo Import complete. Generating CSV files...");
 
-        foreach ($groupedMessages as $group) {
+        // Generate CSVs
+        foreach ($groupedMessages as $key => $group) {
             $meta = $group['meta'];
             $rows = $group['rows'];
 
@@ -112,7 +111,6 @@ class ProcessSwiftMessages extends Command
             $receiver = $meta['receiver'];
             $rawDate = $meta['date_yymmdd'];
 
-            // Convert YYMMDD to DDMMYY for filename
             $dateDdmmyy = $rawDate; 
             if (strlen($rawDate) == 6) {
                 $year = substr($rawDate, 0, 2);
@@ -122,7 +120,7 @@ class ProcessSwiftMessages extends Command
             }
 
             $meaning = strtolower(SwiftCodeTranslator::translateMessageType($mtType));
-            
+
             $filename = sprintf(
                 "%s_%s_%s-%s_%s.csv",
                 $mtType,
@@ -134,12 +132,11 @@ class ProcessSwiftMessages extends Command
 
             $directory = $mtType;
             Storage::disk($outboundDisk)->makeDirectory($directory);
-
             $csvContent = $this->processingService->generateCsvContent($rows);
             $fullPath = $directory . '/' . $filename;
             Storage::disk($outboundDisk)->put($fullPath, $csvContent);
 
-            $this->info("Created CSV: {$fullPath}");
+            $this->info("Created: {$fullPath} (" . count($rows) . " messages combined)");
         }
 
         $this->info("All processing complete.");
