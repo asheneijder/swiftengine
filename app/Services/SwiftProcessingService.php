@@ -10,6 +10,8 @@ use App\Services\SwiftParsers\Mt543Parser;
 use App\Services\SwiftParsers\Mt545Parser;
 use App\Services\SwiftParsers\Mt547Parser;
 use App\Services\SwiftParsers\Mt940Parser;
+use App\Services\SwiftParsers\Mt544Parser;
+use App\Services\SwiftParsers\Mt546Parser;
 use App\Services\SwiftParserUtil;
 use App\Services\SwiftCodeTranslator;
 use Illuminate\Support\Facades\Log;
@@ -25,11 +27,19 @@ class SwiftProcessingService
         '545' => Mt545Parser::class,
         '547' => Mt547Parser::class,
         '940' => Mt940Parser::class,
+        '544' => Mt544Parser::class,
+        '546' => Mt546Parser::class,
     ];
 
     /**
      * Main control method to process files, save to DB, and generate CSVs.
      * * @param string $inboundDisk Name of the filesystem disk for inbound files.
+     * @param string $outboundDisk Name of the filesystem disk for outbound CSVs.
+     * @param callable|null $onProgress Optional callback for logging output (type, message).
+     */
+    /**
+     * Main control method to process files, save to DB, and generate CSVs.
+     * @param string $inboundDisk Name of the filesystem disk for inbound files.
      * @param string $outboundDisk Name of the filesystem disk for outbound CSVs.
      * @param callable|null $onProgress Optional callback for logging output (type, message).
      */
@@ -50,20 +60,30 @@ class SwiftProcessingService
 
         foreach ($files as $filePath) {
             $fileName = basename($filePath);
+
+            // 1. Skip system files (starting with dot)
             if (str_starts_with($fileName, '.')) continue;
+
+            // 2. Validate Extension: Allow only .fin and .txt
+            $extension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+            if (!in_array($extension, ['fin', 'txt'])) {
+                if ($onProgress) $onProgress('line', "Skipping {$fileName}: Unsupported extension.");
+                continue;
+            }
 
             if ($onProgress) $onProgress('line', "Parsing: {$fileName}");
 
             try {
+                // Get content (works for both .fin and .txt as they are plain text)
                 $fileContent = Storage::disk($inboundDisk)->get($filePath);
                 $result = $this->parseFile($fileContent, $fileName);
 
                 if ($result) {
-                    // 1. Duplicate Check & Save to MongoDB
+                    // Duplicate Check & Save to MongoDB
                     if ($this->saveToDatabase($result['data'])) {
                         if ($onProgress) $onProgress('info', "  [ACCEPTED] Saved to database.");
-                        
-                        // 2. Add to Group for CSV generation
+
+                        // Add to Group for CSV generation
                         $this->groupMessage($groupedMessages, $result);
                     } else {
                         if ($onProgress) $onProgress('warn', "  [REJECTED] Duplicate data found for {$fileName}. Skipping.");
@@ -82,7 +102,7 @@ class SwiftProcessingService
             if ($onProgress) $onProgress('info', "Grouping complete. Generating CSV files...");
             $this->generateAndSaveCsvs($groupedMessages, $outboundDisk, $onProgress);
         }
-        
+
         if ($onProgress) $onProgress('info', "All processing complete.");
     }
 
@@ -179,7 +199,7 @@ class SwiftProcessingService
             $rawDate = $meta['date_yymmdd'];
 
             // Convert YYMMDD to DDMMYY
-            $dateDdmmyy = $rawDate; 
+            $dateDdmmyy = $rawDate;
             if (strlen($rawDate) == 6) {
                 $year = substr($rawDate, 0, 2);
                 $month = substr($rawDate, 2, 2);
@@ -188,7 +208,7 @@ class SwiftProcessingService
             }
 
             $meaning = strtolower(SwiftCodeTranslator::translateMessageType($mtType));
-            
+
             $filename = sprintf(
                 "%s_%s_%s-%s_%s.csv",
                 $mtType,
@@ -208,7 +228,7 @@ class SwiftProcessingService
             if ($onProgress) $onProgress('info', "Created CSV: {$fullPath} (" . count($rows) . " msgs)");
         }
     }
-    
+
     /**
      * Converts array rows to CSV string.
      */
@@ -219,12 +239,12 @@ class SwiftProcessingService
         }
 
         $headers = array_keys(reset($rows));
-        
+
         $output = fopen('php://temp', 'r+');
         fputcsv($output, $headers);
-        
+
         foreach ($rows as $row) {
-            $sanitizedRow = array_map(function($item) {
+            $sanitizedRow = array_map(function ($item) {
                 if (is_array($item) || is_object($item)) {
                     return json_encode($item);
                 }
@@ -233,11 +253,11 @@ class SwiftProcessingService
 
             fputcsv($output, $sanitizedRow);
         }
-        
+
         rewind($output);
         $csvContent = stream_get_contents($output);
         fclose($output);
-        
+
         return $csvContent;
     }
 }
