@@ -3,16 +3,21 @@
 namespace App\Services;
 
 use App\Models\SwiftMessage;
+// MT Parsers
 use App\Services\SwiftParsers\Mt103Parser;
 use App\Services\SwiftParsers\Mt210Parser;
 use App\Services\SwiftParsers\Mt541Parser;
 use App\Services\SwiftParsers\Mt543Parser;
+use App\Services\SwiftParsers\Mt544Parser; // Added
 use App\Services\SwiftParsers\Mt545Parser;
+use App\Services\SwiftParsers\Mt546Parser; // Added
 use App\Services\SwiftParsers\Mt547Parser;
 use App\Services\SwiftParsers\Mt940Parser;
-use App\Services\SwiftParsers\Mt544Parser;
-use App\Services\SwiftParsers\Mt546Parser;
+// MX Parsers
+use App\Services\SwiftParsers\MxPacs008Parser; // Added
+
 use App\Services\SwiftParserUtil;
+use App\Services\SwiftMxParserUtil; // Added
 use App\Services\SwiftCodeTranslator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -20,32 +25,26 @@ use Illuminate\Support\Facades\Storage;
 class SwiftProcessingService
 {
     protected $parsers = [
+        // MT (FIN)
         '103' => Mt103Parser::class,
         '210' => Mt210Parser::class,
         '541' => Mt541Parser::class,
         '543' => Mt543Parser::class,
+        '544' => Mt544Parser::class,
         '545' => Mt545Parser::class,
+        '546' => Mt546Parser::class,
         '547' => Mt547Parser::class,
         '940' => Mt940Parser::class,
-        '544' => Mt544Parser::class,
-        '546' => Mt546Parser::class,
+
+        // MX (XML) - Keys match the 'MsgDefIdr' (e.g. pacs.008)
+        'pacs.008' => MxPacs008Parser::class,
     ];
 
     /**
      * Main control method to process files, save to DB, and generate CSVs.
-     * * @param string $inboundDisk Name of the filesystem disk for inbound files.
-     * @param string $outboundDisk Name of the filesystem disk for outbound CSVs.
-     * @param callable|null $onProgress Optional callback for logging output (type, message).
-     */
-    /**
-     * Main control method to process files, save to DB, and generate CSVs.
-     * @param string $inboundDisk Name of the filesystem disk for inbound files.
-     * @param string $outboundDisk Name of the filesystem disk for outbound CSVs.
-     * @param callable|null $onProgress Optional callback for logging output (type, message).
      */
     public function processInboundFiles(string $inboundDisk, string $outboundDisk, ?callable $onProgress = null): void
     {
-        // Ensure directories exist
         Storage::disk($inboundDisk)->makeDirectory('/');
         Storage::disk($outboundDisk)->makeDirectory('/');
 
@@ -61,12 +60,12 @@ class SwiftProcessingService
         foreach ($files as $filePath) {
             $fileName = basename($filePath);
 
-            // 1. Skip system files (starting with dot)
+            // Filter: Hidden files
             if (str_starts_with($fileName, '.')) continue;
 
-            // 2. Validate Extension: Allow only .fin and .txt
-            $extension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
-            if (!in_array($extension, ['fin', 'txt'])) {
+            // Filter: Extensions (Allow .fin, .txt, .xml)
+            $ext = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['fin', 'txt', 'xml'])) {
                 if ($onProgress) $onProgress('line', "Skipping {$fileName}: Unsupported extension.");
                 continue;
             }
@@ -74,22 +73,21 @@ class SwiftProcessingService
             if ($onProgress) $onProgress('line', "Parsing: {$fileName}");
 
             try {
-                // Get content (works for both .fin and .txt as they are plain text)
                 $fileContent = Storage::disk($inboundDisk)->get($filePath);
                 $result = $this->parseFile($fileContent, $fileName);
 
                 if ($result) {
-                    // Duplicate Check & Save to MongoDB
+                    // 1. Duplicate Check & Save to MongoDB
                     if ($this->saveToDatabase($result['data'])) {
                         if ($onProgress) $onProgress('info', "  [ACCEPTED] Saved to database.");
 
-                        // Add to Group for CSV generation
+                        // 2. Add to Group for CSV generation
                         $this->groupMessage($groupedMessages, $result);
                     } else {
                         if ($onProgress) $onProgress('warn', "  [REJECTED] Duplicate data found for {$fileName}. Skipping.");
                     }
                 } else {
-                    if ($onProgress) $onProgress('warn', "Skipped {$fileName}: Unable to determine MT type.");
+                    if ($onProgress) $onProgress('warn', "Skipped {$fileName}: Unable to determine Message Type.");
                 }
             } catch (\Exception $e) {
                 $errorMsg = "Error processing {$fileName}: " . $e->getMessage();
@@ -107,9 +105,23 @@ class SwiftProcessingService
     }
 
     /**
-     * Parses a single file content.
+     * Parses a single file content (Detects MT or MX automatically).
      */
     public function parseFile(string $fileContent, string $fileName): ?array
+    {
+        // 1. Check if XML (MX Message)
+        if (SwiftMxParserUtil::isXml($fileContent)) {
+            return $this->parseMxFile($fileContent, $fileName);
+        }
+
+        // 2. Default to MT (FIN Message)
+        return $this->parseMtFile($fileContent, $fileName);
+    }
+
+    /**
+     * Logic for processing MT (FIN) files
+     */
+    protected function parseMtFile(string $fileContent, string $fileName): ?array
     {
         $mtType = SwiftParserUtil::getMessageType($fileContent);
 
@@ -120,7 +132,7 @@ class SwiftProcessingService
         $parser = new $this->parsers[$mtType]();
         $parsedData = $parser->parse($fileContent);
 
-        // Extract Metadata
+        // Extract Metadata for grouping
         $sender = SwiftParserUtil::getSenderBic($fileContent) ?? 'UNKNOWN';
         $receiver = SwiftParserUtil::getReceiverBic($fileContent) ?? 'UNKNOWN';
         $messageDate = SwiftParserUtil::getMessageDate($fileContent) ?? '000000'; // YYMMDD
@@ -139,13 +151,55 @@ class SwiftProcessingService
     }
 
     /**
+     * Logic for processing MX (XML) files
+     */
+    protected function parseMxFile(string $fileContent, string $fileName): ?array
+    {
+        $xml = SwiftMxParserUtil::parseXml($fileContent);
+        if (!$xml) return null;
+
+        // Extract Full Type (e.g., 'pacs.008.001.08')
+        $fullType = SwiftMxParserUtil::getMxMessageType($xml);
+
+        // Match against registered parsers (e.g. check if 'pacs.008' exists)
+        // We take the first 8 chars (pacs.008) to match our array keys
+        $mxType = substr($fullType, 0, 8);
+
+        if (!$mxType || !isset($this->parsers[$mxType])) {
+            return null;
+        }
+
+        $parser = new $this->parsers[$mxType]();
+        $parsedData = $parser->parse($fileContent);
+
+        // Extract Metadata for grouping
+        // XML dates are usually YYYY-MM-DD. We convert to YYMMDD to match MT grouping logic.
+        $creationDate = $parsedData['Creation Date'] ?? date('Y-m-d');
+        $dateYymmdd = date('ymd', strtotime($creationDate));
+
+        return [
+            'type' => $mxType,
+            'data' => $parsedData,
+            'meta' => [
+                'mt_type' => $mxType,
+                'sender' => $parsedData['Sender'] ?? 'UNKNOWN',
+                'receiver' => $parsedData['Receiver'] ?? 'UNKNOWN',
+                'date_yymmdd' => $dateYymmdd,
+                'source_file' => $fileName
+            ]
+        ];
+    }
+
+    /**
      * Checks for duplicates and saves to MongoDB.
      */
     protected function saveToDatabase(array $data): bool
     {
-        // Check if exact data already exists
+        // Check if exact data already exists (flexible for both MT and MX fields)
         $exists = SwiftMessage::where(function ($query) use ($data) {
             foreach ($data as $key => $value) {
+                // MongoDB keys can't have dots; ensuring safety if needed, 
+                // but usually values are just strings.
                 $query->where($key, $value);
             }
         })->exists();
@@ -208,6 +262,8 @@ class SwiftProcessingService
             }
 
             $meaning = strtolower(SwiftCodeTranslator::translateMessageType($mtType));
+            // Sanitize meaning for filename (remove spaces/special chars)
+            $meaning = preg_replace('/[^a-z0-9]+/', '_', $meaning);
 
             $filename = sprintf(
                 "%s_%s_%s-%s_%s.csv",
@@ -218,6 +274,7 @@ class SwiftProcessingService
                 $dateDdmmyy
             );
 
+            // Group by Type (Folder)
             $directory = $mtType;
             Storage::disk($outboundDisk)->makeDirectory($directory);
 
