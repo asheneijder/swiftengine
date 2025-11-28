@@ -44,7 +44,6 @@ class SwiftCodeTranslator
             '547' => 'Deliver Against Payment Confirmation',
             '548' => 'Settlement Status and Processing Advice',
             '564' => 'Corporate Action Notification',
-            '565' => 'Corporate Action Instruction', // Added
             '566' => 'Corporate Action Confirmation',
             '567' => 'Corporate Action Status and Processing Advice',
 
@@ -159,72 +158,6 @@ class SwiftCodeTranslator
             'PLAC' => 'Placement',
             'SYND' => 'Syndicate',
             'RODE' => 'Return of Delivery Without Matching',
-            default => $code,
-        };
-    }
-
-    /**
-     * Translate Settlement Condition (Tag 22F::STCO).
-     * Added for MT540/MT542 Samples.
-     */
-    public static function translateSettlementCondition(?string $code): ?string
-    {
-        $code = self::cleanCode($code);
-        return match ($code) {
-            'PART' => 'Partial Settlement',
-            'NPAR' => 'No Partial Settlement',
-            'PARS' => 'Partial Settlement Allowed',
-            'DROP' => 'Drop',
-            'GAMB' => 'Gambling',
-            'CLEN' => 'Clean',
-            'DIRT' => 'Dirty',
-            'PHYS' => 'Physical',
-            'SPDL' => 'Special Delivery',
-            default => $code,
-        };
-    }
-
-    /**
-     * Translate Corporate Action Event (Tag 22F::CAEV).
-     * Added for MT565 Sample.
-     */
-    public static function translateCorporateActionEvent(?string $code): ?string
-    {
-        $code = self::cleanCode($code);
-        return match ($code) {
-            'DRIP' => 'Dividend Reinvestment',
-            'DVCA' => 'Cash Dividend',
-            'DVSE' => 'Stock Dividend',
-            'INTR' => 'Interest Payment',
-            'REDM' => 'Redemption',
-            'RHTS' => 'Rights Issue',
-            'BONU' => 'Bonus Issue',
-            'SPLF' => 'Stock Split',
-            'MEET' => 'Meeting',
-            'TEND' => 'Tender/Acquisition/Takeover/Purchase Offer',
-            'XMET' => 'Extraordinary Meeting',
-            'CHAN' => 'Change',
-            'MRGR' => 'Merger',
-            default => $code,
-        };
-    }
-
-    /**
-     * Translate Corporate Action Option (Tag 22F::CAOP).
-     * Added for MT565 Sample.
-     */
-    public static function translateCorporateActionOption(?string $code): ?string
-    {
-        $code = self::cleanCode($code);
-        return match ($code) {
-            'CASH' => 'Receive Cash',
-            'SECU' => 'Receive Securities',
-            'OTHR' => 'Other',
-            'NOAC' => 'No Action',
-            'LAPS' => 'Lapse',
-            'BOBD' => 'Bond Holder',
-            'QINV' => 'Qualified Investor',
-            'SLLE' => 'Sell Entitlement',
             default => $code,
         };
     }

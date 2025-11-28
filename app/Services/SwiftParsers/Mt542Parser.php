@@ -5,7 +5,7 @@ namespace App\Services\SwiftParsers;
 use App\Services\SwiftParserUtil;
 use App\Services\SwiftCodeTranslator;
 
-class Mt543Parser implements SwiftMessageParser
+class Mt542Parser implements SwiftMessageParser
 {
     public function parse(string $finContent): array
     {
@@ -14,11 +14,9 @@ class Mt543Parser implements SwiftMessageParser
 
         $securityLines = SwiftParserUtil::getMultiLineTagValue($block4, '35B');
         $quantity = SwiftParserUtil::parseQuantity(SwiftParserUtil::getTagValue($block4, '36B', 'SETT'));
-        $dealPrice = SwiftParserUtil::parsePrice(SwiftParserUtil::getTagValue($block4, '90B', 'DEAL'));
-        $settleAmt = SwiftParserUtil::parseCurrencyAmount(SwiftParserUtil::getTagValue($block4, '19A', 'SETT'));
 
         return [
-            'Message Type' => 'MT543 (Deliver Against Payment)',
+            'Message Type' => 'MT542 (Deliver Free)',
             'Sender' => SwiftParserUtil::getSenderBic($finContent),
             'Receiver' => SwiftParserUtil::getReceiverBic($finContent),
             'Reference' => SwiftParserUtil::getTagValue($block4, '20C', 'SEME'),
@@ -32,15 +30,11 @@ class Mt543Parser implements SwiftMessageParser
             'Security Name' => $securityLines[1] ?? null,
             'Quantity' => number_format((float)($quantity['quantity'] ?? 0)),
             
-            // Financials
-            'Deal Price' => trim(($dealPrice['currency'] ?? '') . ' ' . ($dealPrice['price'] ?? '')),
-            'Settlement Amount' => trim(($settleAmt['currency'] ?? '') . ' ' . number_format((float)($settleAmt['amount'] ?? 0), 2)),
-            
             'Settlement Condition' => SwiftCodeTranslator::translateSettlementCondition(SwiftParserUtil::getTagValue($block4, '22F', 'STCO')),
-
+            
             // Parties
-            'Buyer' => SwiftParserUtil::getTagValue($block4, '95P', 'BUYR'),
-            'Receiving Agent' => SwiftParserUtil::getTagValue($block4, '95P', 'REAG'),
+            'Buyer' => SwiftParserUtil::getTagValue($block4, '95P', 'BUYR') ?? SwiftParserUtil::getTagValue($block4, '95R', 'BUYR'),
+            'Receiving Agent' => SwiftParserUtil::getTagValue($block4, '95P', 'REAG') ?? SwiftParserUtil::getTagValue($block4, '95R', 'REAG'),
             'Place of Settlement' => SwiftParserUtil::getTagValue($block4, '95P', 'PSET'),
             'Safekeeping Account' => SwiftParserUtil::getTagValue($block4, '97A', 'SAFE'),
         ];
